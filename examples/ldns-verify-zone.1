@@ -15,9 +15,22 @@ Each name is checked for an NSEC(3), if appropriate.
 
 .SH OPTIONS
 .TP
+\fB-a\fR
+Apex only, check only the zone apex
+
+.TP
+\fB-p\fR \fI[0-100]\fR
+Only check this percentage of the zone.
+Which names to check is determined randomly.
+Defaults to 100.
+
 .TP
 \fB-h\fR
 Show usage and exit
+
+.TP
+\fB-t\fR \fIYYYYMMDDhhmmss | [+|-]offset\fR
+Set the validation time either by an absolute time value or as an offset in seconds from the current time.
 
 .TP
 \fB-v\fR

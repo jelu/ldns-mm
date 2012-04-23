@@ -31,6 +31,7 @@ static void
 usage(FILE *fp, const char *prog) {
 	fprintf(fp, "%s [OPTIONS] zonefile key [key [key]]\n", prog);
 	fprintf(fp, "  signs the zone with the given key(s)\n");
+	fprintf(fp, "  -b\t\tuse layout in signed zone and print comments DNSSEC records\n");
 	fprintf(fp, "  -d\t\tused keys are not added to the zone\n");
 	fprintf(fp, "  -e <date>\texpiration date\n");
 	fprintf(fp, "  -f <file>\toutput zone to file (default <name>.signed)\n");
@@ -376,6 +377,10 @@ main(int argc, char *argv[])
 	
 	char *prog =LDNS_STRDUP(argv[0]);
 	ldns_status result;
+
+	ldns_output_format fmt = { ldns_output_format_default->flags, NULL };
+	ldns_rbtree_t **hashmap = NULL;
+
 	
 	inception = 0;
 	expiration = 0;
@@ -384,10 +389,21 @@ main(int argc, char *argv[])
 
 	OPENSSL_config(NULL);
 
-	while ((c = getopt(argc, argv, "a:de:f:i:k:lno:ps:t:vAE:K:")) != -1) {
+	while ((c = getopt(argc, argv, "a:bde:f:i:k:lno:ps:t:vAE:K:")) != -1) {
 		switch (c) {
 		case 'a':
 			nsec3_algorithm = (uint8_t) atoi(optarg);
+			if (nsec3_algorithm != 1) {
+				fprintf(stderr, "Bad NSEC3 algorithm, only RSASHA1 allowed\n");
+				exit(EXIT_FAILURE);
+			}
+			break;
+		case 'b':
+			fmt.flags |= LDNS_COMMENT_BUBBLEBABBLE;
+			fmt.flags |= LDNS_COMMENT_FLAGS;
+			fmt.flags |= LDNS_COMMENT_NSEC3_CHAIN;
+			fmt.flags |= LDNS_COMMENT_LAYOUT;
+			hashmap = (ldns_rbtree_t **)&fmt.data;
 			break;
 		case 'd':
 			add_keys = false;
@@ -454,7 +470,6 @@ main(int argc, char *argv[])
 				usage(stderr, prog);
 				exit(EXIT_FAILURE);
 			}
-			
 			break;
 		case 'p':
 			nsec3_flags = nsec3_flags | LDNS_NSEC3_VARS_OPTOUT_MASK;
@@ -754,7 +769,7 @@ main(int argc, char *argv[])
 	added_rrs = ldns_rr_list_new();
 
 	if (use_nsec3) {
-		result = ldns_dnssec_zone_sign_nsec3_flg(signed_zone,
+		result = ldns_dnssec_zone_sign_nsec3_flg_mkmap(signed_zone,
 			added_rrs,
 			keys,
 			ldns_dnssec_default_replace_signatures,
@@ -764,7 +779,8 @@ main(int argc, char *argv[])
 			nsec3_iterations,
 			nsec3_salt_length,
 			nsec3_salt,
-			signflags);
+			signflags,
+			hashmap);
 	} else {
 		result = ldns_dnssec_zone_sign_flg(signed_zone,
 				added_rrs,
@@ -792,7 +808,8 @@ main(int argc, char *argv[])
 				fprintf(stderr, "Unable to open %s for writing: %s\n",
 					   outputfile_name, strerror(errno));
 			} else {
-				ldns_dnssec_zone_print(outputfile, signed_zone);
+				ldns_dnssec_zone_print_fmt(
+						outputfile, &fmt, signed_zone);
 				fclose(outputfile);
 			}
 		}

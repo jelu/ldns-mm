@@ -2,7 +2,15 @@
 # Copyright 2009, Wouter Wijngaards, NLnet Labs.   
 # BSD licensed.
 #
-# Version 11
+# Version 19
+# 2011-12-05 Fix getaddrinfowithincludes on windows with fedora16 mingw32-gcc.
+# 	     Fix ACX_MALLOC for redefined malloc error.
+# 	     Fix GETADDRINFO_WITH_INCLUDES to add -lws2_32
+# 2011-11-10 Fix FLTO test to not drop a.out in current directory.
+# 2011-11-01 Fix FLTO test for llvm on Lion.
+# 2011-08-01 Fix nonblock test (broken at v13).
+# 2011-08-01 Fix autoconf 2.68 warnings
+# 2011-06-23 Add ACX_CHECK_FLTO to check -flto.
 # 2010-08-16 Fix FLAG_OMITTED for AS_TR_CPP changes in autoconf-2.66.
 # 2010-07-02 Add check for ss_family (for minix).
 # 2010-04-26 Fix to use CPPFLAGS for CHECK_COMPILER_FLAGS.
@@ -32,6 +40,7 @@
 # ACX_DETERMINE_EXT_FLAGS_UNBOUND - find out which flags enable BSD and POSIX.
 # ACX_CHECK_FORMAT_ATTRIBUTE	- find cc printf format syntax.
 # ACX_CHECK_UNUSED_ATTRIBUTE	- find cc variable unused syntax.
+# ACX_CHECK_FLTO		- see if cc supports -flto and use it if so.
 # ACX_LIBTOOL_C_ONLY		- create libtool for C only, improved.
 # ACX_TYPE_U_CHAR		- u_char type.
 # ACX_TYPE_RLIM_T		- rlim_t type.
@@ -382,6 +391,24 @@ int test() {
 ], [CFLAGS="$CFLAGS -D__EXTENSIONS__"])
 
 ])dnl End of ACX_DETERMINE_EXT_FLAGS_UNBOUND
+
+dnl Check if CC supports -flto.
+dnl in a way that supports clang and suncc (that flag does something else,
+dnl but fails to link).  It sets it in CFLAGS if it works.
+AC_DEFUN([ACX_CHECK_FLTO],
+[AC_MSG_CHECKING([if $CC supports -flto])
+BAKCFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -flto"
+AC_LINK_IFELSE([AC_LANG_PROGRAM([], [])], [
+    if $CC $CFLAGS -o conftest conftest.c 2>&1 | grep "warning: no debug symbols in executable" >/dev/null; then
+	CFLAGS="$BAKCFLAGS"
+	AC_MSG_RESULT(no)
+    else
+	AC_MSG_RESULT(yes)
+    fi
+    rm -f conftest conftest.c conftest.o
+], [CFLAGS="$BAKCFLAGS" ; AC_MSG_RESULT(no)])
+])
 
 dnl Check the printf-format attribute (if any)
 dnl result in HAVE_ATTR_FORMAT.  
@@ -754,7 +781,7 @@ AC_DEFUN([ACX_CHECK_GETADDRINFO_WITH_INCLUDES],
 AC_MSG_CHECKING(for getaddrinfo)
 ac_cv_func_getaddrinfo=no
 AC_LINK_IFELSE(
-[
+[AC_LANG_SOURCE([[
 #ifdef __cplusplus
 extern "C"
 {
@@ -768,14 +795,21 @@ int main() {
         ;
         return 0;
 }
-],
+]])],
 dnl this case on linux, solaris, bsd
-[ac_cv_func_getaddrinfo="yes"],
+[ac_cv_func_getaddrinfo="yes"
+dnl see if on windows
+if test "$ac_cv_header_windows_h" = "yes"; then
+	AC_DEFINE(USE_WINSOCK, 1, [Whether the windows socket API is used])
+	USE_WINSOCK="1"
+	LIBS="$LIBS -lws2_32"
+fi
+],
 dnl no quick getaddrinfo, try mingw32 and winsock2 library.
 ORIGLIBS="$LIBS"
 LIBS="$LIBS -lws2_32"
 AC_LINK_IFELSE(
-AC_LANG_PROGRAM(
+[AC_LANG_PROGRAM(
 [
 #ifdef HAVE_WS2TCPIP_H
 #include <ws2tcpip.h>
@@ -784,7 +818,7 @@ AC_LANG_PROGRAM(
 [
         (void)getaddrinfo(NULL, NULL, NULL, NULL);
 ]
-),
+)],
 [
 ac_cv_func_getaddrinfo="yes"
 dnl already: LIBS="$LIBS -lws2_32"
@@ -848,7 +882,8 @@ if echo $target | grep mingw32 >/dev/null; then
 	AC_MSG_RESULT([no (windows)])
 	AC_DEFINE([NONBLOCKING_IS_BROKEN], 1, [Define if the network stack does not fully support nonblocking io (causes lower performance).])
 else
-AC_RUN_IFELSE(AC_LANG_PROGRAM([
+AC_RUN_IFELSE([
+AC_LANG_SOURCE([[
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -872,7 +907,9 @@ AC_RUN_IFELSE(AC_LANG_PROGRAM([
 #ifdef HAVE_TIME_H
 #include <time.h>
 #endif
-],[[
+
+int main(void)
+{
 	int port;
 	int sfd, cfd;
 	int num = 10;
@@ -965,7 +1002,9 @@ AC_RUN_IFELSE(AC_LANG_PROGRAM([
 
 	close(sfd);
 	close(cfd);
-]]), [
+	return 0;
+}
+]])], [
 	AC_MSG_RESULT([yes])
 ], [
 	AC_MSG_RESULT([no])
@@ -1005,13 +1044,13 @@ AC_DEFUN([ACX_FUNC_IOCTLSOCKET],
 [
 # check ioctlsocket
 AC_MSG_CHECKING(for ioctlsocket)
-AC_LINK_IFELSE(AC_LANG_PROGRAM([
+AC_LINK_IFELSE([AC_LANG_PROGRAM([
 #ifdef HAVE_WINSOCK2_H
 #include <winsock2.h>
 #endif
 ], [
 	(void)ioctlsocket(0, 0, NULL);
-]), [
+])], [
 AC_MSG_RESULT(yes)
 AC_DEFINE(HAVE_IOCTLSOCKET, 1, [if the function 'ioctlsocket' is available])
 ],[AC_MSG_RESULT(no)])
@@ -1021,10 +1060,23 @@ dnl detect malloc and provide malloc compat prototype.
 dnl $1: unique name for compat code
 AC_DEFUN([ACX_FUNC_MALLOC],
 [
-	AC_FUNC_MALLOC
-	if test "$ac_cv_func_malloc_0_nonnull" = no; then
-		AC_DEFINE_UNQUOTED([malloc], [rpl_malloc_$1], [Define if  replacement function should be used.])
-	fi
+	AC_MSG_CHECKING([for GNU libc compatible malloc])
+	AC_RUN_IFELSE([AC_LANG_PROGRAM(
+[[#if defined STDC_HEADERS || defined HAVE_STDLIB_H
+#include <stdlib.h>
+#else
+char *malloc ();
+#endif
+]], [ if(malloc(0) != 0) return 1;])
+],
+	[AC_MSG_RESULT([no])
+	AC_LIBOBJ(malloc)
+	AC_DEFINE_UNQUOTED([malloc], [rpl_malloc_$1], [Define if  replacement function should be used.])] ,
+	[AC_MSG_RESULT([yes])
+	AC_DEFINE([HAVE_MALLOC], 1, [If have GNU libc compatible malloc])],
+	[AC_MSG_RESULT([no (crosscompile)])
+	AC_LIBOBJ(malloc)
+	AC_DEFINE_UNQUOTED([malloc], [rpl_malloc_$1], [Define if  replacement function should be used.])] )
 ])
 
 dnl Define fallback for fseeko and ftello if needed.

@@ -455,7 +455,10 @@ ldns_rr_new_frm_str_internal(ldns_rr **newrr, const char *str,
 						cur_hex_data_size = 0;
 						while(cur_hex_data_size < 2 * hex_data_size) {
 							c = ldns_bget_token(rd_buf, rd, delimiters, LDNS_MAX_RDFLEN);
-							if (c == -1) {
+							if (c != -1) {
+								rd_strlen = strlen(rd);
+							}
+							if (c == -1 || (size_t)cur_hex_data_size + rd_strlen > 2 * (size_t)hex_data_size) {
 								LDNS_FREE(hex_data_str);
 								LDNS_FREE(rd);
 								LDNS_FREE(b64);
@@ -465,7 +468,6 @@ ldns_rr_new_frm_str_internal(ldns_rr **newrr, const char *str,
 								ldns_rr_free(new);
 								return LDNS_STATUS_SYNTAX_RDATA_ERR;
 							}
-							rd_strlen = strlen(rd);
 							strncpy(hex_data_str + cur_hex_data_size, rd, rd_strlen);
 							cur_hex_data_size += rd_strlen;
 						}
@@ -862,7 +864,7 @@ ldns_rr_pop_rdf(ldns_rr *rr)
 ldns_rdf *
 ldns_rr_rdf(const ldns_rr *rr, size_t nr)
 {
-	if (nr < ldns_rr_rd_count(rr)) {
+	if (rr && nr < ldns_rr_rd_count(rr)) {
 		return rr->_rdata_fields[nr];
 	} else {
 		return NULL;
@@ -1662,7 +1664,10 @@ ldns_rr_compare_ds_dnskey(ldns_rr *ds,
 		return false;
 	}
 
-algo = ldns_rdf2native_int8(ldns_rr_rdf(ds, 2));
+	if (ldns_rr_rdf(ds, 2) == NULL) {
+		return false;
+	}
+	algo = ldns_rdf2native_int8(ldns_rr_rdf(ds, 2));
 
 	ds_gen = ldns_key_rr2ds(dnskey, algo);
 	if (ds_gen) {
@@ -1768,7 +1773,6 @@ ldns_rr2canonical(ldns_rr *rr)
         	case LDNS_RR_TYPE_MG:
         	case LDNS_RR_TYPE_MR:
         	case LDNS_RR_TYPE_PTR:
-        	case LDNS_RR_TYPE_HINFO:
         	case LDNS_RR_TYPE_MINFO:
         	case LDNS_RR_TYPE_MX:
         	case LDNS_RR_TYPE_RP:
@@ -2270,7 +2274,11 @@ static ldns_rr_descriptor rdata_field_descriptors[] = {
 {LDNS_RR_TYPE_NULL, "TYPE247", 1, 1, type_0_wireformat, LDNS_RDF_TYPE_NONE, LDNS_RR_NO_COMPRESS, 0 },
 {LDNS_RR_TYPE_NULL, "TYPE248", 1, 1, type_0_wireformat, LDNS_RDF_TYPE_NONE, LDNS_RR_NO_COMPRESS, 0 },
 {LDNS_RR_TYPE_NULL, "TYPE249", 1, 1, type_0_wireformat, LDNS_RDF_TYPE_NONE, LDNS_RR_NO_COMPRESS, 0 },
-{LDNS_RR_TYPE_TSIG, "TSIG", 8, 9, type_tsig_wireformat, LDNS_RDF_TYPE_NONE, LDNS_RR_NO_COMPRESS, 0 },
+/* LDNS_RDF_TYPE_INT16_DATA essentially takes two fields (length and data) and
+ * makes them into one. So, while in rfc 2845 is specified that a TSIG may have 
+ * 8 or 9 rdata fields, by this implementation, the min/max are 7 each. 
+ */
+{LDNS_RR_TYPE_TSIG, "TSIG", 7, 7, type_tsig_wireformat, LDNS_RDF_TYPE_NONE, LDNS_RR_NO_COMPRESS, 0 },
 /* split in array, no longer contiguous */
 {LDNS_RR_TYPE_DLV, "DLV", 4, 4, type_ds_wireformat, LDNS_RDF_TYPE_NONE, LDNS_RR_NO_COMPRESS, 0 }
 };
